@@ -1,0 +1,4 @@
+numpy
+datasets
+pyyaml
+psycopg2-binary

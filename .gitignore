@@ -1,0 +1,19 @@
+
+.venv
+.idea
+*.iml
+out
+gen
+
+config/memory_config.yaml
+
+reports
+
+temp.py
+plan.md
+
+# Python caches
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/

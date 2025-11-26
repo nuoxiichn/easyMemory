@@ -1,0 +1,25 @@
+embedding:
+  provider: openai_compat
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  model: text-embedding-v4
+  api_key:
+  dim: 1536
+
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+  model: deepseek-chat
+  api_key:
+  temperature: 0.2
+  max_tokens: 128
+
+db:
+  dsn:
+
+datasets:
+  hotpot:
+    split: validation
+  twiki:
+    split: validation
+  mquake:
+    split: validation
