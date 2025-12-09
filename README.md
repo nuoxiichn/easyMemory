@@ -15,6 +15,8 @@ pip install -r requirements.txt
 - Hotpot 本地样本 → 生成报告：`python runners/run_hotpot_with_memory.py --limit 50 --top-k 5 --log-interval 5`
 - 2Wiki 本地样本：`python runners/run_twiki_with_memory.py --limit 50 --top-k 5 --log-interval 5`
 - MQuAKE 本地样本：`python runners/run_mquake_with_memory.py --limit 50 --top-k 5 --log-interval 5`
+- LongMemEval: `python runners/run_LongMemEval_with_memory.py --limit 5 --top-k 5`
+- Locomo: `runners/run_locomo_with_memory.py --limit 1 --top-k 5`
 - 接口验证（可选随机向量）：`python runners/verify_memory_ops.py [--random-embed] [--hard-clean]`
 
 报告输出至 `reports/<dataset>/report_<timestamp>.txt`，数据写入配置中的 Postgres 表（分别为 hotpot/twiki/mquake 专用表）。
