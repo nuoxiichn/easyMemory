@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument(
         "--log-interval", 
         type=int, 
-        default=5, 
+        default=10, 
         help="每处理 N 个样本输出一次进度（0 表示不输出）"
     )
     parser.add_argument(
@@ -45,6 +45,21 @@ def main() -> None:
         type=int, 
         default=5, 
         help="RAG 检索时返回的 top-k 上下文数量"
+    )
+    parser.add_argument(
+        "--rag-mode",
+        type=str,
+        default="observation",
+        choices=["dialog", "observation", "summary"],
+        help="选择 RAG 的检索源模式 (默认: observation)"
+    )
+    
+    parser.add_argument(
+        "--qa-categories",
+        type=int,
+        nargs="+",
+        default=None,
+        help="仅测试指定类别的 QA (例如: --qa-categories 1 3)，默认全部"
     )
     parser.add_argument(
         "--skip-ingest",
@@ -63,7 +78,6 @@ def main() -> None:
     
     config = load_config()
     
-    # 获取 LoCoMo 数据集配置
     datasets_cfg = config.get("datasets", {}).get("locomo", {}) if isinstance(config, dict) else {}
     path = datasets_cfg.get("path")
     split = datasets_cfg.get("split", "validation")
@@ -71,8 +85,10 @@ def main() -> None:
     print(f"数据集: LoCoMo")
     print(f"分割: {split}")
     print(f"路径: {path or '使用默认/虚拟数据'}")
+    print(f"RAG 模式: {args.rag_mode}")
+    qa_filter_msg = str(args.qa_categories) if args.qa_categories else "All (所有类别)"
+    print(f"测试 QA 类别: {qa_filter_msg}")
     
-    # 获取数据库表配置
     db_tables = config.get("db", {}).get("tables", {}) if isinstance(config, dict) else {}
     table_name = db_tables.get("locomo")
     
@@ -99,14 +115,12 @@ def main() -> None:
     print("步骤 3: 加载数据集")
     print("=" * 60)
     
-    # 加载 LoCoMo 数据集
     ds = load_locomo(split=split, path=path, fallback_to_dummy=True)
     
     if not ds:
         print("✗ 加载数据集失败")
         return
     
-    # 限制样本数量
     if args.limit is not None:
         ds = list(ds)[: args.limit]
     else:
@@ -119,12 +133,11 @@ def main() -> None:
     # ========================================================================
     if not args.skip_ingest:
         print("\n" + "=" * 60)
-        print("步骤 4: 导入数据到记忆系统")
+        print(f"步骤 4: 导入数据到记忆系统 (模式: {args.rag_mode})")
         print("=" * 60)
         
         for idx, sample in enumerate(ds, start=1):
-            # 导入 LoCoMo 样本
-            ingest_locomo_sample(memory, sample)
+            ingest_locomo_sample(memory, sample, mode=args.rag_mode)
             
             if args.log_interval and idx % args.log_interval == 0:
                 print(f"  进度: {idx}/{len(ds)} 样本已导入", flush=True)
@@ -141,13 +154,20 @@ def main() -> None:
     print("步骤 5: 执行 RAG 查询并生成报告")
     print("=" * 60)
     
-    # 创建 LoCoMo 报告目录
     reports_dir = ROOT / "reports" / "locomo"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    report_path = reports_dir / f"report_{int(time.time())}.txt"
+    report_path = reports_dir / f"report_{args.rag_mode}_{int(time.time())}.txt"
     
     lines = []
-    total_questions = sum(len(sample.get("qa", [])) for sample in ds)
+    total_questions = 0
+    for sample in ds:
+        for qa in sample.get("qa", []):
+            cat = qa.get("category", 0)
+            if args.qa_categories is None or cat in args.qa_categories:
+                total_questions += 1
+                
+    print(f"计划测试问题总数: {total_questions} (过滤条件: {qa_filter_msg})")
+    
     question_idx = 0
     
     for sample_idx, sample in enumerate(ds, start=1):
@@ -160,16 +180,24 @@ def main() -> None:
             category = qa.get("category", 0)
             evidence = qa.get("evidence", [])
             
+            if args.qa_categories is not None and category not in args.qa_categories:
+                continue
+
             if not question:
                 continue
             
             question_idx += 1
             
-            # 执行 RAG 查询
+            query_constraints = {
+                "dataset": "locomo", 
+                "sample_id": sample_id,
+                "rag_mode": args.rag_mode 
+            }
+            
             result = memory.rag_answer(
                 question=question,
                 llm_fn=llm_fn,
-                constraints={"dataset": "locomo", "sample_id": sample_id},
+                constraints=query_constraints,
                 top_k=args.top_k,
             )
             
@@ -199,18 +227,19 @@ def main() -> None:
     print("=" * 60)
     
     with report_path.open("w", encoding="utf-8") as f:
-        # 写入报告头
         f.write("=" * 80 + "\n")
         f.write("LoCoMo 数据集 RAG 测试报告\n")
         f.write("=" * 80 + "\n")
         f.write(f"生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"测试模式: {args.rag_mode}\n")
+        f.write(f"QA类别筛选: {qa_filter_msg}\n") # 记录筛选条件
         f.write(f"样本数量: {len(ds)}\n")
         f.write(f"问题数量: {len(lines)}\n")
         f.write(f"Top-K: {args.top_k}\n")
         f.write(f"数据库表: {table_name}\n")
         f.write("=" * 80 + "\n\n")
         
-        # 按分类统计
+        # ... (后续无需更改) ...
         category_counts = {}
         for line in lines:
             cat = line.get("category", 0)
@@ -221,7 +250,6 @@ def main() -> None:
             f.write(f"  Category {cat}: {count} 个问题\n")
         f.write("\n")
         
-        # 写入每个问题的结果
         for line in lines:
             f.write(f"{'=' * 80}\n")
             f.write(f"问题序号: {line['index']}\n")
@@ -241,9 +269,6 @@ def main() -> None:
     
     print(f"✓ 报告已保存到: {report_path}")
     
-    # ========================================================================
-    # 7. 显示最终统计
-    # ========================================================================
     print("\n" + "=" * 60)
     print("完成!")
     print("=" * 60)
