@@ -120,7 +120,7 @@ def load_locomo(
 def ingest_locomo_sample(
     memory, 
     sample: Dict[str, Any],
-    mode: str = "observation"  # "dialog", "observation", "summary"
+    mode: str = "observation"
 ) -> List[str]:
 
     ingested_ids: List[str] = []
@@ -130,7 +130,6 @@ def ingest_locomo_sample(
     speaker_a = conversation.get("speaker_a", "Speaker A")
     speaker_b = conversation.get("speaker_b", "Speaker B")
     
-    # 基础元数据
     base_metadata = {
         "dataset": "locomo",
         "sample_id": sample_id,
@@ -139,15 +138,19 @@ def ingest_locomo_sample(
         "rag_mode": mode
     }
 
-    # === 模式 1: 导入 Observations (事实观察) ===
+    # === 获取时间 ===
+    def get_session_time(sess_key):
+        time_key = f"{sess_key}_date_time"
+        return conversation.get(time_key, "unknown")
+
+    # === 模式 1: Observations ===
     if mode == "observation":
         observations_data = sample.get("observation", {})
-        
         for session_key_raw, speaker_data in observations_data.items():
             clean_session_key = session_key_raw.replace("_observation", "")
-            
-            if not isinstance(speaker_data, dict):
-                continue
+            session_time = get_session_time(clean_session_key)
+
+            if not isinstance(speaker_data, dict): continue
 
             for speaker_name, obs_list in speaker_data.items():
                 for obs_item in obs_list:
@@ -160,6 +163,7 @@ def ingest_locomo_sample(
                             meta["type"] = "observation"
                             meta["session_key"] = clean_session_key
                             meta["relevant_speaker"] = speaker_name
+                            meta["timestamp"] = session_time
                             
                             if evidence_id:
                                 meta["evidence_id"] = evidence_id
@@ -168,32 +172,34 @@ def ingest_locomo_sample(
                             rec_id = memory.ingest(obs_text, meta)
                             ingested_ids.append(rec_id)
 
-    # === 模式 2: 导入 Session Summaries (会话摘要) ===
+    # === 模式 2: Session Summaries ===
     elif mode == "summary":
         summaries = sample.get("session_summary", {})
         for key, summary_text in summaries.items():
             session_key = key.replace("_summary", "")
+            session_time = get_session_time(session_key)
             
             if summary_text:
                 meta = base_metadata.copy()
                 meta["type"] = "summary"
                 meta["session_key"] = session_key
+                meta["timestamp"] = session_time
                 
                 rec_id = memory.ingest(summary_text, meta)
                 ingested_ids.append(rec_id)
 
-    # === 模式 3: 导入 Raw Dialogs (原始对话) ===
-    else: # mode == "dialog"
+    # === 模式 3: Raw Dialogs ===
+    else: 
         session_keys = sorted([k for k in conversation.keys() if k.startswith("session_") and not k.endswith("_date_time")])
         
         for session_key in session_keys:
-            session_dialogue = conversation.get(session_key, [])
+            session_time = get_session_time(session_key)
             
+            session_dialogue = conversation.get(session_key, [])
             conversation_parts = []
             contained_ids = []
             
             for turn in session_dialogue:
-                # 拼接文本
                 speaker = turn.get('speaker', 'Unknown')
                 text = turn.get('text', '')
                 conversation_parts.append(f"{speaker}: {text}")
@@ -208,6 +214,7 @@ def ingest_locomo_sample(
                 meta = base_metadata.copy()
                 meta["type"] = "conversation"
                 meta["session_key"] = session_key
+                meta["timestamp"] = session_time 
                 
                 if contained_ids:
                     meta["evidence_ids"] = contained_ids
