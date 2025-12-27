@@ -139,7 +139,7 @@ def ingest_locomo_sample(
         "rag_mode": mode
     }
 
-    # === 模式 1: 导入 Observations ===
+    # === 模式 1: 导入 Observations (事实观察) ===
     if mode == "observation":
         observations_data = sample.get("observation", {})
         
@@ -150,23 +150,25 @@ def ingest_locomo_sample(
                 continue
 
             for speaker_name, obs_list in speaker_data.items():
-                
                 for obs_item in obs_list:
                     if isinstance(obs_item, list) and len(obs_item) >= 1:
                         obs_text = obs_item[0]
-                        evidence_id = obs_item[1] if len(obs_item) > 1 else ""
+                        evidence_id = obs_item[1] if len(obs_item) > 1 else None
 
                         if obs_text:
                             meta = base_metadata.copy()
                             meta["type"] = "observation"
                             meta["session_key"] = clean_session_key
-                            meta["relevant_speaker"] = speaker_name 
-                            meta["evidence_id"] = evidence_id
+                            meta["relevant_speaker"] = speaker_name
+                            
+                            if evidence_id:
+                                meta["evidence_id"] = evidence_id
+                                meta["evidence_ids"] = [evidence_id]
                             
                             rec_id = memory.ingest(obs_text, meta)
                             ingested_ids.append(rec_id)
 
-    # === 模式 2: 导入 Session Summaries ===
+    # === 模式 2: 导入 Session Summaries (会话摘要) ===
     elif mode == "summary":
         summaries = sample.get("session_summary", {})
         for key, summary_text in summaries.items():
@@ -180,22 +182,36 @@ def ingest_locomo_sample(
                 rec_id = memory.ingest(summary_text, meta)
                 ingested_ids.append(rec_id)
 
-    # === 模式 3: 导入 Raw Dialogs ===
+    # === 模式 3: 导入 Raw Dialogs (原始对话) ===
     else: # mode == "dialog"
         session_keys = sorted([k for k in conversation.keys() if k.startswith("session_") and not k.endswith("_date_time")])
+        
         for session_key in session_keys:
             session_dialogue = conversation.get(session_key, [])
             
             conversation_parts = []
+            contained_ids = []
+            
             for turn in session_dialogue:
-                 conversation_parts.append(f"{turn.get('speaker')}: {turn.get('text')}")
+                # 拼接文本
+                speaker = turn.get('speaker', 'Unknown')
+                text = turn.get('text', '')
+                conversation_parts.append(f"{speaker}: {text}")
+                
+                dia_id = turn.get("dia_id")
+                if dia_id:
+                    contained_ids.append(dia_id)
+
             conversation_text = "\n\n".join(conversation_parts)
 
             if conversation_text:
                 meta = base_metadata.copy()
                 meta["type"] = "conversation"
                 meta["session_key"] = session_key
-                # 这里可以把 summary 放在 meta 里作为辅助?
+                
+                if contained_ids:
+                    meta["evidence_ids"] = contained_ids
+                
                 rec_id = memory.ingest(conversation_text, meta)
                 ingested_ids.append(rec_id)
                 

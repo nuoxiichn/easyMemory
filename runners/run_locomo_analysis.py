@@ -60,27 +60,22 @@ def compute_f1(prediction, ground_truth):
 def check_evidence_recall(retrieved_records, gold_evidence_ids):
     """
     检查检索到的记录中是否包含标准答案所需的证据ID
-    
-    retrieved_records: 列表，每个元素包含 metadata
-    gold_evidence_ids: 列表，例如 ['D1:3', 'D2:5']
     """
     if not gold_evidence_ids:
-        return False, [] # 无标准证据，无法评估检索
+        return False, []
 
-    # 提取检索到的所有 evidence_id (前提是 metadata 里存了)
     retrieved_ids = set()
     for rec in retrieved_records:
         meta = rec.get("metadata", {})
-        # 兼容 observation 模式存的 evidence_id
+        
         if "evidence_id" in meta and meta["evidence_id"]:
             retrieved_ids.add(meta["evidence_id"])
-        
-        # 兼容 dialog 模式 (如果 metadata 有 turn_id 范围等，这里简化处理)
-        # 如果是 Dialog 模式，可能难以精确匹配 ID，这里主要针对 Observation 模式优化
+            
+        if "evidence_ids" in meta and isinstance(meta["evidence_ids"], list):
+            for eid in meta["evidence_ids"]:
+                retrieved_ids.add(eid)
 
-    # 检查是否命中
-    # 命中逻辑：只要找回了 Gold Evidence 中的任意一条，就算检索成功 (宽松模式)
-    # 也可以改为必须找回所有 (严格模式)
+    # 检查命中
     hits = [gid for gid in gold_evidence_ids if gid in retrieved_ids]
     success = len(hits) > 0
     return success, hits
